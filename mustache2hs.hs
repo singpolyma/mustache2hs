@@ -4,9 +4,13 @@ import Control.Arrow
 import System.Environment (getArgs)
 import System.FilePath (takeBaseName)
 import Data.Monoid
+import Data.Maybe
 import Data.Char
 import Data.List
 import Control.Monad.Trans.State (get, modify, evalState, State)
+
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -127,80 +131,107 @@ originalMustache (_, tree) = mconcat $ map origOne tree
 		]
 	origOne _ = mempty
 
-codeGenTree :: (Show a, Enum a) => FilePath -> MuTree -> State a Builder
-codeGenTree pth (types, tree) = do
-	(code, helpers) <- (second concat . unzip) <$> mapM (codeGen types) tree
+ctxVars :: MuTree -> [Text]
+ctxVars (types, tree) = nub $ concatMap oneVars tree
+	where
+	oneVars (MuVar name _) = [name]
+	oneVars (MuSection name (stypes, stree))
+		| isJust (lookup name types) = [name]
+		| otherwise = name: ctxVars ((stypes ++ types), stree)
+	oneVars (MuSectionInv name (stypes, stree)) =
+		name : ctxVars ((stypes ++ types), stree)
+	oneVars _ = []
+
+codeGenTree :: (Show a, Enum a) => Text -> Text -> MuTree -> State (a, Map Text [Text]) Builder
+codeGenTree fname name (types, tree) = do
+	(code, helpers) <- (second concat . unzip) <$> mapM (codeGen types name) tree
+	(_, recs) <- get
 	return $ mconcat [
-			name,
-			Builder.fromString " escapeFunction ctx = mconcat [", -- TODO: pattern match
+			Builder.fromText fname,
+			Builder.fromString " escapeFunction ctx@(",
+			pattern (Map.lookup name recs),
+			Builder.fromString ") = mconcat [",
 			mintercalate comma code,
 			Builder.fromString "]\n",
 			if null helpers then mempty else Builder.fromString "\twhere\n\t",
 			mintercalate wsep helpers
 		]
 	where
+	pattern (Just ctx) = mconcat [
+			Builder.fromText name,
+			Builder.fromString "Record {",
+			mintercalate comma $ map (\x -> mconcat [
+					Builder.fromText x,
+					Builder.fromString "=",
+					Builder.fromText x
+				]) ctx,
+			Builder.fromString "}"
+		]
 	wsep = Builder.fromString "\n\t"
 	comma = Builder.fromString ", "
-	name = Builder.fromString $ takeBaseName pth
 
-codeGen :: (Show a, Enum a) => MuTypeHeader -> Mustache -> State a (Builder, [Builder])
-codeGen _ (MuText txt) = return (Builder.fromShow (T.unpack txt), [])
-codeGen _ (MuVar name False) = return (mconcat [
+codeGen :: (Show a, Enum a) => MuTypeHeader -> Text -> Mustache -> State (a, Map Text [Text]) (Builder, [Builder])
+codeGen _ _ (MuText txt) = return (Builder.fromShow (T.unpack txt), [])
+codeGen _ _ (MuVar name False) = return (mconcat [
 		Builder.fromString "fromMaybe mempty ",
 		Builder.fromText name
 	], [])
-codeGen _ (MuVar name True) = return (mconcat [
+codeGen _ _ (MuVar name True) = return (mconcat [
 		Builder.fromString "fromMaybe mempty (escapeFunction (",
 		Builder.fromText name,
 		Builder.fromString "))"
 	], [])
-codeGen types (MuSection name tree)
+codeGen types ctxName (MuSection name (stypes, stree))
 	| lookup name types == Just MuLambda =
 		return (mconcat [
 				Builder.fromText name,
 				Builder.fromString " (",
-				Builder.fromShow $ BS.toString $ Builder.toByteString $ originalMustache tree,
+				Builder.fromShow $ BS.toString $ Builder.toByteString $ originalMustache (stypes, stree),
 				Builder.fromString " )"
 			], [])
 	| otherwise = do
-		id <- get
-		modify succ
-		let nm = T.unpack name ++ show id
-		helper <- codeGenTree nm tree
+		(id, recs) <- get
+		modify (first succ)
+		let nm = name `mappend` T.pack (show id)
 		case lookup name types of
 			Just MuList -> do
-				-- TODO: pattern match
+				let rec = concat $ maybeToList (Map.lookup name recs)
+				modify (second $ Map.insert name
+					(nub $ ctxVars (stypes ++ types, stree) ++ rec))
+				helper <- codeGenTree nm name (stypes ++ types, stree)
 				return (mconcat [
 						Builder.fromString "map (",
-						Builder.fromString nm,
+						Builder.fromText nm,
 						Builder.fromString " escapeFunction) ",
 						Builder.fromText name
 					], [helper])
-			_ ->
+			_ -> do
+				helper <- codeGenTree nm ctxName (stypes ++ types, stree)
 				return (mconcat [
 						Builder.fromString "case ",
 						Builder.fromText name,
 						Builder.fromString " of { Just _ -> (",
-						Builder.fromString nm,
+						Builder.fromText nm,
 						Builder.fromString " escapeFunction ctx); _ -> mempty }"
 					], [helper])
-codeGen _ (MuSectionInv name tree) = do
-		id <- get
-		modify succ
-		let nm = T.unpack name ++ show id
-		helper <- codeGenTree nm tree
+codeGen types ctxName (MuSectionInv name (stypes, stree)) = do
+		(id, _) <- get
+		modify (first succ)
+		let nm = name `mappend` T.pack (show id)
+		helper <- codeGenTree nm ctxName (stypes ++ types, stree)
 		return (mconcat [
 				Builder.fromString "if foldr (\\_ _ -> False) True ",
 				Builder.fromText name,
 				Builder.fromString " then ",
-				Builder.fromString nm,
+				Builder.fromText nm,
 				Builder.fromString " escapeFunction ctx else mempty"
 			], [helper])
-codeGen _ _ = return mempty
+codeGen _ _ _ = return mempty
 
 main :: IO ()
 main = do
 		[input] <- getArgs
 		Right tree <- parseOnly parser <$> T.readFile input
-		Builder.toByteStringIO BS.putStr $ evalState (codeGenTree input tree) 0
+		let name = T.pack $ takeBaseName input
+		Builder.toByteStringIO BS.putStr $ evalState (codeGenTree name name tree) (0, Map.fromList [(name, ctxVars tree)])
 		putStrLn ""
