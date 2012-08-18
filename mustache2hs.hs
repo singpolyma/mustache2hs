@@ -1,12 +1,16 @@
 module Main where
 
-import Control.Arrow
-import System.Environment (getArgs)
+import System.Environment (getArgs, getProgName)
+import System.Exit (exitFailure)
+import System.IO (hPutStrLn, stderr)
+import System.Console.GetOpt (getOpt, usageInfo, ArgOrder(..), OptDescr(..), ArgDescr(..))
 import System.FilePath (takeBaseName)
 import Data.Monoid
 import Data.Maybe
 import Data.Char
 import Data.List
+import Control.Monad
+import Control.Arrow
 import Control.Monad.Trans.State (get, modify, evalState, State)
 
 import Data.Text (Text)
@@ -24,6 +28,20 @@ import qualified Data.ByteString.UTF8 as BS
 
 import ParseRecords
 
+data Flag = Help | RecordModule String deriving (Show, Read, Eq)
+
+flags :: [OptDescr Flag]
+flags = [
+		Option ['m'] ["record-module"] (ReqArg RecordModule "MODULE") "Module containing records to be used as context.",
+		Option ['h'] ["help"] (NoArg Help) "Show this help text."
+	]
+
+usage :: [String] -> IO ()
+usage errors = do
+	mapM_ (hPutStrLn stderr) errors
+	name <- getProgName
+	hPutStrLn stderr $ usageInfo (name ++ " [-m MODULE] <input-files>") flags
+
 type MuTree =  [Mustache]
 
 data Mustache =
@@ -40,7 +58,15 @@ isMuComment _ = False
 
 parser :: Parser MuTree
 parser = do
-	body <- many1 (comment <|> sectionInv <|> section <|> tripleVar <|> ampVar <|> mustache (var True) <|> txt)
+	body <- many1 (
+			comment <|>
+			sectionInv <|>
+			section <|>
+			tripleVar <|>
+			ampVar <|>
+			mustache (var True) <|>
+			txt
+		)
 	return $ filter (not . isMuComment) body
 	where
 	comment = mustache $ do
@@ -51,7 +77,8 @@ parser = do
 				if c1 /= '}' || c2 /= Just '}' then return c1 else
 					fail "End of comment text"
 		return MuComment
-	sectionInv = liftA2 MuSectionInv (sectionPiece '^') parser <* sectionPiece '/'
+	sectionInv =
+		liftA2 MuSectionInv (sectionPiece '^') parser <* sectionPiece '/'
 	section = liftA2 MuSection (sectionPiece '#') parser <* sectionPiece '/'
 	sectionPiece c = mustache $ do
 		_ <- char c
@@ -116,7 +143,8 @@ originalMustache = mconcat . map origOne
 codeGenTree :: (Show a, Enum a) => Text -> String -> Records -> MuTree -> State a Builder
 codeGenTree fname rname recs tree = do
 	let Just rec = lookup rname recs
-	(code, helpers) <- (second concat . unzip) <$> mapM (codeGen (rname,rec) recs) tree
+	(code, helpers) <- (second concat . unzip) <$>
+		mapM (codeGen (rname,rec) recs) tree
 	return $ mconcat [
 			Builder.fromText fname,
 			Builder.fromString " escapeFunction ctx@(",
@@ -157,7 +185,8 @@ codeGen (rname,rec) recs (MuSection name stree)
 		return (mconcat [
 				Builder.fromText name,
 				Builder.fromString " (",
-				Builder.fromShow $ BS.toString $ Builder.toByteString $ originalMustache stree,
+				Builder.fromShow $ BS.toString $
+					Builder.toByteString $ originalMustache stree,
 				Builder.fromString " )"
 			], [])
 	| otherwise = do
@@ -196,13 +225,33 @@ codeGen (rname,rec) recs (MuSectionInv name stree) = do
 		], [helper])
 codeGen _ _ _ = return mempty
 
+codeGenFile :: Records -> FilePath -> IO [FilePath]
+codeGenFile recs input = do
+	Right tree <- parseOnly parser <$> T.readFile input
+	let name = takeBaseName input
+	let fname = T.pack name
+	let rname = (toUpper $ head name) : tail (name ++ "Record")
+	Builder.toByteStringIO BS.putStr $ evalState (codeGenTree fname rname recs tree) 0
+	return []
+
+codeGenFiles :: Records -> [FilePath] -> IO ()
+codeGenFiles _ [] = return ()
+codeGenFiles recs inputs =
+		(concat <$> mapM (codeGenFile recs) inputs) >>= codeGenFiles recs
+
 main :: IO ()
 main = do
-		[input] <- getArgs
-		Right tree <- parseOnly parser <$> T.readFile input
-		let name = takeBaseName input
-		let fname = T.pack name
-		let rname = (toUpper $ head name) : tail (name ++ "Record")
-		recs <- extractRecords <$> readFile "Records.hs"
-		Builder.toByteStringIO BS.putStr $ evalState (codeGenTree fname rname recs tree) 0
-		putStrLn ""
+	(flags, args, errors) <- fmap (getOpt RequireOrder flags) getArgs
+	case (args, errors) of
+		_ | Help `elem` flags -> usage errors
+		_ | null (getRecordModules flags) -> usage errors >> exitFailure
+		_ | null args -> usage errors >> exitFailure
+		_ -> main' (getRecordModules flags) args
+	where
+	main' recordModules inputs =
+		(concat <$> mapM (fmap extractRecords . readFile) recordModules)
+			>>= (`codeGenFiles` inputs)
+	getRecordModules = foldr (\x ms -> case x of
+			RecordModule m -> m : ms
+			_ -> ms
+		) []
