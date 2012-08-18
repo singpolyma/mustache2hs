@@ -49,6 +49,7 @@ data Mustache =
 	MuVar        Text Bool |
 	MuSection    Text MuTree |
 	MuSectionInv Text MuTree |
+	MuPartial    Text |
 	MuComment
 	deriving (Show, Eq)
 
@@ -62,6 +63,7 @@ parser = do
 			comment <|>
 			sectionInv <|>
 			section <|>
+			partial <|>
 			tripleVar <|>
 			ampVar <|>
 			mustache (var True) <|>
@@ -83,6 +85,10 @@ parser = do
 	sectionPiece c = mustache $ do
 		_ <- char c
 		name
+	partial = mustache $ do
+		_ <- char '>'
+		skipSpace
+		MuPartial <$> takeWhile1 (/='}')
 	tripleVar = mustache $ do
 		_ <- char '{'
 		v <- var False
@@ -140,12 +146,12 @@ originalMustache = mconcat . map origOne
 		]
 	origOne _ = mempty
 
-codeGenTree :: (Show a, Enum a) => Text -> String -> Records -> MuTree -> State a Builder
+codeGenTree :: (Show a, Enum a) => Text -> String -> Records -> MuTree -> State a (Builder, [Text])
 codeGenTree fname rname recs tree = do
-	let Just rec = lookup rname recs
-	(code, helpers) <- (second concat . unzip) <$>
-		mapM (codeGen (rname,rec) recs) tree
-	return $ mconcat [
+	let rec = recordMustExist $ lookup rname recs
+	(code, helpers', partials) <- unzip3 <$> mapM (codeGen (rname,rec) recs) tree
+	let helpers = concat helpers'
+	return (mconcat [
 			Builder.fromText fname,
 			Builder.fromString " escapeFunction ctx@(",
 			pattern rec,
@@ -154,8 +160,10 @@ codeGenTree fname rname recs tree = do
 			Builder.fromString "]\n",
 			if null helpers then mempty else Builder.fromString "\twhere\n\t",
 			mintercalate wsep helpers
-		]
+		], concat partials)
 	where
+	recordMustExist (Just r) = r
+	recordMustExist _ = error ("No record named: " ++ rname)
 	pattern rec = mconcat [
 			Builder.fromString rname,
 			Builder.fromString " {",
@@ -169,17 +177,17 @@ codeGenTree fname rname recs tree = do
 	wsep = Builder.fromString "\n\t"
 	comma = Builder.fromString ", "
 
-codeGen :: (Show a, Enum a) => (String,Record) -> Records -> Mustache -> State a (Builder, [Builder])
-codeGen _ _ (MuText txt) = return (Builder.fromShow (T.unpack txt), [])
+codeGen :: (Show a, Enum a) => (String,Record) -> Records -> Mustache -> State a (Builder, [Builder], [Text])
+codeGen _ _ (MuText txt) = return (Builder.fromShow (T.unpack txt), [], [])
 codeGen _ _ (MuVar name False) = return (mconcat [
 		Builder.fromString "fromMaybe mempty ",
 		Builder.fromText name
-	], [])
+	], [], [])
 codeGen _ _ (MuVar name True) = return (mconcat [
 		Builder.fromString "fromMaybe mempty (escapeFunction (",
 		Builder.fromText name,
 		Builder.fromString "))"
-	], [])
+	], [], [])
 codeGen (rname,rec) recs (MuSection name stree)
 	| lookup name rec == Just MuLambda =
 		return (mconcat [
@@ -188,56 +196,64 @@ codeGen (rname,rec) recs (MuSection name stree)
 				Builder.fromShow $ BS.toString $
 					Builder.toByteString $ originalMustache stree,
 				Builder.fromString " )"
-			], [])
+			], [], [])
 	| otherwise = do
 		id <- get
 		modify succ
 		let nm = name `mappend` T.pack (show id)
 		case lookup name rec of
 			Just (MuList rname) -> do
-				helper <- codeGenTree nm rname recs stree
+				(helper, partials) <- codeGenTree nm rname recs stree
 				return (mconcat [
 						Builder.fromString "map (",
 						Builder.fromText nm,
 						Builder.fromString " escapeFunction) ",
 						Builder.fromText name
-					], [helper])
+					], [helper], partials)
 			_ -> do
-				helper <- codeGenTree nm rname recs stree
+				(helper, partials) <- codeGenTree nm rname recs stree
 				return (mconcat [
 						Builder.fromString "case ",
 						Builder.fromText name,
 						Builder.fromString " of { Just _ -> (",
 						Builder.fromText nm,
 						Builder.fromString " escapeFunction ctx); _ -> mempty }"
-					], [helper])
+					], [helper], partials)
 codeGen (rname,rec) recs (MuSectionInv name stree) = do
 	id <- get
 	modify succ
 	let nm = name `mappend` T.pack (show id)
-	helper <- codeGenTree nm rname recs stree
+	(helper, partials) <- codeGenTree nm rname recs stree
 	return (mconcat [
 			Builder.fromString "if foldr (\\_ _ -> False) True ",
 			Builder.fromText name,
 			Builder.fromString " then ",
 			Builder.fromText nm,
 			Builder.fromString " escapeFunction ctx else mempty"
-		], [helper])
-codeGen _ _ _ = return mempty
+		], [helper], partials)
+codeGen (rname,rec) recs (MuPartial name) =
+	let fname = takeBaseName $ T.unpack name in
+	return (mconcat [
+		Builder.fromString fname,
+		Builder.fromString " escapeFunction ctx"
+	], [], [name])
+codeGen _ _ _ = return (mempty, [], [])
 
-codeGenFile :: Records -> FilePath -> IO [FilePath]
+codeGenFile :: Records -> FilePath -> IO (Builder, [FilePath])
 codeGenFile recs input = do
 	Right tree <- parseOnly parser <$> T.readFile input
 	let name = takeBaseName input
 	let fname = T.pack name
 	let rname = (toUpper $ head name) : tail (name ++ "Record")
-	Builder.toByteStringIO BS.putStr $ evalState (codeGenTree fname rname recs tree) 0
-	return []
+	let (builder, partials) = evalState (codeGenTree fname rname recs tree) 0
+	return (builder, map T.unpack partials)
 
-codeGenFiles :: Records -> [FilePath] -> IO ()
-codeGenFiles _ [] = return ()
-codeGenFiles recs inputs =
-		(concat <$> mapM (codeGenFile recs) inputs) >>= codeGenFiles recs
+codeGenFiles :: Records -> [FilePath] -> IO Builder
+codeGenFiles _ [] = return mempty
+codeGenFiles recs inputs = do
+		(builders, partials) <- unzip <$> mapM (codeGenFile recs) inputs
+		builder <- codeGenFiles recs (concat partials)
+		return $ (mconcat builders) `mappend` builder
 
 main :: IO ()
 main = do
@@ -248,9 +264,10 @@ main = do
 		_ | null args -> usage errors >> exitFailure
 		_ -> main' (getRecordModules flags) args
 	where
-	main' recordModules inputs =
-		(concat <$> mapM (fmap extractRecords . readFile) recordModules)
-			>>= (`codeGenFiles` inputs)
+	main' recordModules inputs = do
+		recs <- concat <$> mapM (fmap extractRecords . readFile) recordModules
+		builder <- codeGenFiles recs inputs
+		Builder.toByteStringIO BS.putStr builder
 	getRecordModules = foldr (\x ms -> case x of
 			RecordModule m -> m : ms
 			_ -> ms
