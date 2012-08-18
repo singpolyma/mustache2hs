@@ -157,9 +157,11 @@ codeGenTree fname rname recs tree = do
 			pattern rec,
 			Builder.fromString ") = mconcat [",
 			mintercalate comma code,
-			Builder.fromString "]\n",
-			if null helpers then mempty else Builder.fromString "\twhere\n\t",
-			mintercalate wsep helpers
+			Builder.fromString "]",
+			if null helpers then mempty else Builder.fromString " where {",
+			mintercalate wsep helpers,
+			if null helpers then mempty else Builder.fromString "}",
+			Builder.fromString "\n"
 		], concat partials)
 	where
 	recordMustExist (Just r) = r
@@ -174,7 +176,7 @@ codeGenTree fname rname recs tree = do
 				]) (map fst rec),
 			Builder.fromString "}"
 		]
-	wsep = Builder.fromString "\n\t"
+	wsep = Builder.fromString "; "
 	comma = Builder.fromString ", "
 
 codeGen :: (Show a, Enum a) => (String,Record) -> Records -> Mustache -> State a (Builder, [Builder], [Text])
@@ -184,7 +186,7 @@ codeGen _ _ (MuVar name False) = return (mconcat [
 		Builder.fromText name
 	], [], [])
 codeGen _ _ (MuVar name True) = return (mconcat [
-		Builder.fromString "fromMaybe mempty (escapeFunction (",
+		Builder.fromString "fromMaybe mempty (fmap escapeFunction (",
 		Builder.fromText name,
 		Builder.fromString "))"
 	], [], [])
@@ -205,7 +207,7 @@ codeGen (rname,rec) recs (MuSection name stree)
 			Just (MuList rname) -> do
 				(helper, partials) <- codeGenTree nm rname recs stree
 				return (mconcat [
-						Builder.fromString "map (",
+						Builder.fromString "concatMap (",
 						Builder.fromText nm,
 						Builder.fromString " escapeFunction) ",
 						Builder.fromText name
@@ -267,6 +269,11 @@ main = do
 	main' recordModules inputs = do
 		recs <- concat <$> mapM (fmap extractRecords . readFile) recordModules
 		builder <- codeGenFiles recs inputs
+		putStrLn "import Prelude hiding (foldr)"
+		putStrLn "import Data.Foldable (foldr)"
+		putStrLn "import Data.Maybe"
+		putStrLn "import Data.Monoid"
+		mapM_ (\m -> putStrLn $ "import " ++ takeBaseName m ++ "\n") recordModules
 		Builder.toByteStringIO BS.putStr builder
 	getRecordModules = foldr (\x ms -> case x of
 			RecordModule m -> m : ms
