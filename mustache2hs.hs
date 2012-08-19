@@ -180,13 +180,18 @@ codeGenTree fname rname recs tree = do
 	comma = Builder.fromString ", "
 
 codeGen :: (Show a, Enum a) => (String,Record) -> Records -> Mustache -> State a (Builder, [Builder], [Text])
-codeGen _ _ (MuText txt) = return (Builder.fromShow (T.unpack txt), [], [])
+codeGen _ _ (MuText txt) = return (mconcat [
+		Builder.fromString "Builder.fromString ",
+		Builder.fromShow (T.unpack txt)
+	], [], [])
 codeGen _ _ (MuVar name False) = return (mconcat [
-		Builder.fromString "fromMaybe mempty ",
-		Builder.fromText name
+		Builder.fromString "fromMaybe mempty (Builder.fromText $ toPathPiece",
+		Builder.fromText name,
+		Builder.fromString ")"
 	], [], [])
 codeGen _ _ (MuVar name True) = return (mconcat [
-		Builder.fromString "fromMaybe mempty (fmap escapeFunction (",
+		Builder.fromString "fromMaybe mempty (fmap ",
+		Builder.fromString "(Builder.fromText . escapeFunction . toPathPiece) (",
 		Builder.fromText name,
 		Builder.fromString "))"
 	], [], [])
@@ -207,7 +212,7 @@ codeGen (rname,rec) recs (MuSection name stree)
 			Just (MuList rname) -> do
 				(helper, partials) <- codeGenTree nm rname recs stree
 				return (mconcat [
-						Builder.fromString "concatMap (",
+						Builder.fromString "mconcat $ map (",
 						Builder.fromText nm,
 						Builder.fromString " escapeFunction) ",
 						Builder.fromText name
@@ -273,6 +278,8 @@ main = do
 		putStrLn "import Data.Foldable (foldr)"
 		putStrLn "import Data.Maybe"
 		putStrLn "import Data.Monoid"
+		putStrLn "import Web.PathPieces" -- Maybe use a different typeclass?
+		putStrLn "import qualified Blaze.ByteString.Builder.Char.Utf8 as Builder"
 		mapM_ (\m -> putStrLn $ "import " ++ takeBaseName m ++ "\n") recordModules
 		Builder.toByteStringIO BS.putStr builder
 	getRecordModules = foldr (\x ms -> case x of
