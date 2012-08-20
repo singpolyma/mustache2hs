@@ -49,12 +49,14 @@ extractFromField types (name, t) =
 
 extractFromRecordConstructor :: [(String, HsType)] -> HsConDecl -> [Field]
 extractFromRecordConstructor types (HsRecDecl _ _ fields) = map (extractFromField types) fields
-extractFromRecordConstructor _ _ = []
+extractFromRecordConstructor _ _ = error "Only single data-constructor records may be used as context"
 
 extractFromDataDecl :: [(String, HsType)] -> HsDecl -> (String, Record)
-extractFromDataDecl types (HsDataDecl _ _ typeName _ constructors _) =
-	(hsNameToString typeName, concatMap (extractFromRecordConstructor types) constructors)
-extractFromDataDecl _ _ = error "Programmer error, only call extractFromDataDecl with TypeDecl"
+extractFromDataDecl types (HsDataDecl _ _ typeName _ [constructor] _) =
+	(hsNameToString typeName, extractFromRecordConstructor types constructor)
+extractFromDataDecl _ (HsDataDecl _ _ typeName  _ _ _) =
+	(hsNameToString typeName, error "Only single data-constructor records may be used as context")
+extractFromDataDecl _ _ = error "Programmer error, only call extractFromDataDecl with DataDecl"
 
 extractFromTypeDecl :: HsDecl -> (String, HsType)
 extractFromTypeDecl (HsTypeDecl _ name _ t) = (hsNameToString name, t)
