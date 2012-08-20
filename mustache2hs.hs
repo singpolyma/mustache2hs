@@ -272,15 +272,15 @@ main = do
 		_ -> main' (getRecordModules flags) args
 	where
 	main' recordModules inputs = do
-		recs <- concat <$> mapM (fmap extractRecords . readFile) recordModules
-		builder <- codeGenFiles recs inputs
+		(ms, recs) <- unzip <$> mapM (fmap extractRecords . readFile) recordModules
+		builder <- codeGenFiles (concat recs) inputs
 		putStrLn "import Prelude hiding (foldr)"
 		putStrLn "import Data.Foldable (foldr)"
 		putStrLn "import Data.Maybe"
 		putStrLn "import Data.Monoid"
 		putStrLn "import Web.PathPieces" -- Maybe use a different typeclass?
 		putStrLn "import qualified Blaze.ByteString.Builder.Char.Utf8 as Builder"
-		mapM_ (\m -> putStrLn $ "import " ++ takeBaseName m ++ "\n") recordModules
+		mapM_ (\m -> putStrLn $ "import " ++ m ++ "\n") ms
 		Builder.toByteStringIO BS.putStr builder
 	getRecordModules = foldr (\x ms -> case x of
 			RecordModule m -> m : ms

@@ -62,9 +62,9 @@ extractFromTypeDecl :: HsDecl -> (String, HsType)
 extractFromTypeDecl (HsTypeDecl _ name _ t) = (hsNameToString name, t)
 extractFromTypeDecl _ = error "Programmer error, only call extractFromTypeDecl with TypeDecl"
 
-extractRecords :: String -> Records
+extractRecords :: String -> (String, Records)
 extractRecords moduleSrc =
-	map (extractFromDataDecl (map extractFromTypeDecl types)) datas
+	(mod, map (extractFromDataDecl (map extractFromTypeDecl types)) datas)
 	where
 	(types, datas) = partition (isTypeDecl) $ filter (\d -> isDataDecl d || isTypeDecl d) decls
-	ParseOk (HsModule _ _ _ _ decls) = parseModule moduleSrc
+	ParseOk (HsModule _ (Module mod) _ _ decls) = parseModule moduleSrc
