@@ -4,7 +4,7 @@ import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 import System.Console.GetOpt (getOpt, usageInfo, ArgOrder(..), OptDescr(..), ArgDescr(..))
-import System.FilePath (takeBaseName)
+import System.FilePath (takeBaseName, dropExtension)
 import Data.Monoid
 import Data.Maybe
 import Data.Char
@@ -40,7 +40,7 @@ usage :: [String] -> IO ()
 usage errors = do
 	mapM_ (hPutStrLn stderr) errors
 	name <- getProgName
-	hPutStrLn stderr $ usageInfo (name ++ " [-m MODULE] <input-files>") flags
+	hPutStrLn stderr $ usageInfo (name ++ " [-m MODULE] <input-file> <record-name> ...") flags
 
 type MuTree =  [Mustache]
 
@@ -160,8 +160,7 @@ codeGenTree fname rname recs tree = do
 			Builder.fromString "]",
 			if null helpers then mempty else Builder.fromString " where {",
 			mintercalate wsep helpers,
-			if null helpers then mempty else Builder.fromString "}",
-			Builder.fromString "\n"
+			if null helpers then mempty else Builder.fromString "}"
 		], concat partials)
 	where
 	recordMustExist (Just r) = r
@@ -247,21 +246,30 @@ codeGen (rname,rec) recs (MuPartial name) =
 	], [], [name])
 codeGen _ _ _ = return (mempty, [], [])
 
-codeGenFile :: Records -> FilePath -> IO (Builder, [FilePath])
-codeGenFile recs input = do
+camelCasePath :: FilePath -> Text
+camelCasePath = T.pack . go
+	where
+	go ('/':'/':cs) = go ('/' : cs)
+	go ('/':c:cs)   = toUpper c : go cs
+	go (c:cs)       = c : go cs
+	go []           = []
+
+codeGenFile :: Records -> (FilePath, String) -> IO (Builder, [FilePath])
+codeGenFile recs (input, rname) = do
 	Right tree <- parseOnly parser <$> T.readFile input
-	let name = takeBaseName input
-	let fname = T.pack name
-	let rname = (toUpper $ head name) : tail (name ++ "Record")
+	let fname = camelCasePath (dropExtension input)
 	let (builder, partials) = evalState (codeGenTree fname rname recs tree) 0
 	return (builder, map T.unpack partials)
 
-codeGenFiles :: Records -> [FilePath] -> IO Builder
+codeGenFiles :: Records -> [(FilePath, String)] -> IO Builder
 codeGenFiles _ [] = return mempty
 codeGenFiles recs inputs = do
 		(builders, partials) <- unzip <$> mapM (codeGenFile recs) inputs
-		builder <- codeGenFiles recs (concat partials)
-		return $ (mconcat builders) `mappend` builder
+		--builder <- codeGenFiles recs (concat partials)
+		let builder = mempty -- TODO partials
+		return $ (mintercalate nl builders) `mappend` builder
+		where
+		nl = Builder.fromString "\n"
 
 main :: IO ()
 main = do
@@ -270,7 +278,7 @@ main = do
 		_ | Help `elem` flags -> usage errors
 		_ | null (getRecordModules flags) -> usage errors >> exitFailure
 		_ | null args -> usage errors >> exitFailure
-		_ -> main' (getRecordModules flags) args
+		_ -> main' (getRecordModules flags) (pairs args)
 	where
 	main' recordModules inputs = do
 		(ms, recs) <- unzip <$> mapM (fmap extractRecords . readFile) recordModules
@@ -283,7 +291,11 @@ main = do
 		putStrLn "import qualified Blaze.ByteString.Builder.Char.Utf8 as Builder"
 		mapM_ (\m -> putStrLn $ "import " ++ m ++ "\n") ms
 		Builder.toByteStringIO BS.putStr builder
+		putStrLn ""
 	getRecordModules = foldr (\x ms -> case x of
 			RecordModule m -> m : ms
 			_ -> ms
 		) []
+	pairs [] = []
+	pairs (x1:x2:xs) = (x1,x2) : pairs xs
+	pairs _ = error "You must pass in arguments in pairs of <input-file> <record-name>"
