@@ -167,13 +167,13 @@ codeGenTree fname rname recs tree = do
 	recordMustExist (Just r) = r
 	recordMustExist _ = error ("No record named: " ++ rname)
 	pattern rec = mconcat [
-			Builder.fromString rname,
+			Builder.fromString (fst rec),
 			Builder.fromString " {",
 			mintercalate comma $ map (\x -> mconcat [
 					Builder.fromText x,
 					Builder.fromString "=",
 					Builder.fromText x
-				]) (map fst rec),
+				]) (map fst $ snd rec),
 			Builder.fromString "}"
 		]
 	wsep = Builder.fromString "; "
@@ -185,9 +185,10 @@ codeGen _ _ (MuText txt) = return (mconcat [
 		Builder.fromShow (T.unpack txt)
 	], [], [])
 codeGen _ _ (MuVar name False) = return (mconcat [
-		Builder.fromString "fromMaybe mempty (Builder.fromText $ toPathPiece",
+		Builder.fromString "fromMaybe mempty (fmap ",
+		Builder.fromString "(Builder.fromText . toPathPiece) (",
 		Builder.fromText name,
-		Builder.fromString ")"
+		Builder.fromString "))"
 	], [], [])
 codeGen _ _ (MuVar name True) = return (mconcat [
 		Builder.fromString "fromMaybe mempty (fmap ",
@@ -196,7 +197,7 @@ codeGen _ _ (MuVar name True) = return (mconcat [
 		Builder.fromString "))"
 	], [], [])
 codeGen (rname,rec) recs (MuSection name stree)
-	| lookup name rec == Just MuLambda =
+	| lookup name (snd rec) == Just MuLambda =
 		return (mconcat [
 				Builder.fromText name,
 				Builder.fromString " (",
@@ -208,7 +209,7 @@ codeGen (rname,rec) recs (MuSection name stree)
 		id <- get
 		modify succ
 		let nm = name `mappend` T.pack (show id)
-		case lookup name rec of
+		case lookup name (snd rec) of
 			Just (MuList rname) -> do
 				(helper, partials) <- codeGenTree nm rname recs stree
 				return (mconcat [

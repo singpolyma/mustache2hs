@@ -9,8 +9,8 @@ import Language.Haskell.Syntax
 import Data.Text (Text)
 import qualified Data.Text as T
 
-type Records = [(String, Record)]
-type Record = [Field]
+type Records = [(String, Record)] -- Typename, data constructor
+type Record = (String, [Field]) -- Data constructor name, fields
 type Field = (Text, MuType)
 data MuType = MuList String | MuLambda | MuVariable deriving (Show, Eq)
 
@@ -47,8 +47,9 @@ extractFromField :: [(String, HsType)] -> ([HsName], HsBangType) -> Field
 extractFromField types (name, t) =
 	(T.pack $ concatMap hsNameToString name, hsTypeToMuType types $ extractTypeFromBangType t)
 
-extractFromRecordConstructor :: [(String, HsType)] -> HsConDecl -> [Field]
-extractFromRecordConstructor types (HsRecDecl _ _ fields) = map (extractFromField types) fields
+extractFromRecordConstructor :: [(String, HsType)] -> HsConDecl -> Record
+extractFromRecordConstructor types (HsRecDecl _ cname fields) =
+	(hsNameToString cname, map (extractFromField types) fields)
 extractFromRecordConstructor _ _ = error "Only single data-constructor records may be used as context"
 
 extractFromDataDecl :: [(String, HsType)] -> HsDecl -> (String, Record)
