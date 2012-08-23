@@ -185,13 +185,14 @@ codeGen _ _ (MuText txt) = return (mconcat [
 	], [], [])
 codeGen _ _ (MuVar name False) = return (mconcat [
 		Builder.fromString "fromMaybe mempty (fmap ",
-		Builder.fromString "(Builder.fromText . toPathPiece) (",
+		Builder.fromString "(Builder.fromString . show . pretty) (",
 		Builder.fromText name,
 		Builder.fromString "))"
 	], [], [])
 codeGen _ _ (MuVar name True) = return (mconcat [
-		Builder.fromString "fromMaybe mempty (fmap ",
-		Builder.fromString "(Builder.fromText . escapeFunction . toPathPiece) (",
+		Builder.fromString "fromMaybe mempty (fmap (",
+		Builder.fromString "Builder.fromString . escapeFunction . show . pretty",
+		Builder.fromString ") (",
 		Builder.fromText name,
 		Builder.fromString "))"
 	], [], [])
@@ -287,7 +288,7 @@ main = do
 		putStrLn "import Data.Foldable (foldr)"
 		putStrLn "import Data.Maybe"
 		putStrLn "import Data.Monoid"
-		putStrLn "import Web.PathPieces" -- Maybe use a different typeclass?
+		putStrLn "import Text.PrettyPrint.Leijen"
 		putStrLn "import qualified Blaze.ByteString.Builder.Char.Utf8 as Builder"
 		mapM_ (\m -> putStrLn $ "import " ++ m ++ "\n") ms
 		Builder.toByteStringIO BS.putStr builder
