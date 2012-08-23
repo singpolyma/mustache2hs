@@ -2,6 +2,7 @@ module ParseRecords (extractRecords, MuType(..), Records, Record, Field) where
 
 import Data.List
 import Data.Maybe
+import Control.Arrow
 
 import Language.Haskell.Parser
 import Language.Haskell.Syntax
@@ -30,11 +31,16 @@ extractTypeFromBangType :: HsBangType -> HsType
 extractTypeFromBangType (HsBangedTy t) = t
 extractTypeFromBangType (HsUnBangedTy t) = t
 
+hsTypeName' :: [(String, HsType)] -> HsType -> Maybe String
+hsTypeName' types (HsTyCon (UnQual s)) | isJust $ lookup (hsNameToString s) types =
+	hsTypeName' types =<< lookup (hsNameToString s) types
+hsTypeName' _ (HsTyCon (UnQual s)) = Just $ hsNameToString s
+hsTypeName' _ t = Nothing
+
 hsTypeName :: [(String, HsType)] -> HsType -> String
-hsTypeName types (HsTyCon (UnQual s)) | isJust $ lookup (hsNameToString s) types =
-	hsTypeName types $ fromJust $ lookup (hsNameToString s) types
-hsTypeName _ (HsTyCon (UnQual s)) = hsNameToString s
-hsTypeName _ t = error ("Trying to get type name for: " ++ show t)
+hsTypeName types t =
+	fromMaybe (error $ "Trying to get type name for: " ++ show t)
+		(hsTypeName' types t)
 
 hsTypeToMuType :: [(String, HsType)] -> HsType -> MuType
 hsTypeToMuType types (HsTyApp (HsTyCon (Special HsListCon)) t) = MuList (hsTypeName types t)
@@ -63,9 +69,11 @@ extractFromTypeDecl :: HsDecl -> (String, HsType)
 extractFromTypeDecl (HsTypeDecl _ name _ t) = (hsNameToString name, t)
 extractFromTypeDecl _ = error "Programmer error, only call extractFromTypeDecl with TypeDecl"
 
-extractRecords :: String -> (String, Records)
+extractRecords :: String -> (String, Records, [(String, Maybe String)])
 extractRecords moduleSrc =
-	(mod, map (extractFromDataDecl (map extractFromTypeDecl types)) datas)
+	(mod, map (extractFromDataDecl types) datas, simpleTypes)
 	where
-	(types, datas) = partition (isTypeDecl) $ filter (\d -> isDataDecl d || isTypeDecl d) decls
+	simpleTypes = map (second $ hsTypeName' types) types
+	types = map extractFromTypeDecl typeDecls
+	(typeDecls, datas) = partition (isTypeDecl) $ filter (\d -> isDataDecl d || isTypeDecl d) decls
 	ParseOk (HsModule _ (Module mod) _ _ decls) = parseModule moduleSrc

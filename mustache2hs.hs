@@ -280,7 +280,7 @@ codeGenFiles recs inputs = do
 		builder <- codeGenFiles recs (concat partials)
 		return $ (mintercalate nl builders) `mappend` nl `mappend` builder
 		where
-		nl = Builder.fromString "\n"
+		nl = Builder.fromString "\n\n"
 
 main :: IO ()
 main = do
@@ -292,8 +292,10 @@ main = do
 		_ -> main' (getRecordModules flags) (pairs args)
 	where
 	main' recordModules inputs = do
-		(ms, recs) <- unzip <$> mapM (fmap extractRecords . readFile) recordModules
-		builder <- evalStateT (codeGenFiles (concat recs) inputs) []
+		(ms, recs, types) <- unzip3 <$> mapM (fmap extractRecords . readFile) recordModules
+		let types' = concat types
+		let inputs' = map (second (\r -> fromMaybe r (join $ lookup r types'))) inputs
+		builder <- evalStateT (codeGenFiles (concat recs) inputs') []
 		putStrLn "import Prelude hiding (foldr)"
 		putStrLn "import Data.Foldable (foldr)"
 		putStrLn "import Data.Maybe"
