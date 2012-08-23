@@ -272,11 +272,15 @@ codeGen path (rname,rec) recs _ (MuPartial name) =
 codeGen _ _ _ _ _ = return (mempty, [], [])
 
 camelCasePath :: FilePath -> Text
-camelCasePath = T.pack . go
+camelCasePath = T.pack . lowerHead . go
 	where
+	lowerHead [] = []
+	lowerHead (c:cs) = toLower c : cs
 	go ('/':'/':cs) = go ('/' : cs)
 	go ('/':c:cs)   = toUpper c : go cs
-	go (c:cs)       = c : go cs
+	go (c:cs) -- skip characters that cannot got in a name
+		| isAlpha c || isDigit c || c == '_' = c : go cs
+		| otherwise  = go cs
 	go []           = []
 
 codeGenFile :: Records -> (FilePath, String) -> StateT [(FilePath, String)] IO (Builder, [(FilePath, String)])
