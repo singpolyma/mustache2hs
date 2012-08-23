@@ -108,7 +108,7 @@ parser = do
 			if n == Just '{' then fail "singlebrace not match {{" else return c
 		)
 	txt = MuText <$> takeWhile1 (/='{')
-	name = takeWhile1 (\c -> isAlpha c || isDigit c)
+	name = takeWhile1 (\c -> isAlpha c || isDigit c || c == '_')
 	mustache ws f = do
 		_ <- char '{'
 		_ <- char '{'
