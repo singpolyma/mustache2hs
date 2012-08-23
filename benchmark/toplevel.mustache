@@ -1,0 +1,16 @@
+thing: {{thing}}
+
+{{#thing}}
+Thing is truthy!
+{{/thing}}
+
+{{#subs}}
+sub
+	thing2: {{thing2}}
+
+	{{^thing2}}
+		Thing2 is falsey!
+	{{/thing2}}
+
+	{{> sublevel.mustache}}
+{{/subs}}

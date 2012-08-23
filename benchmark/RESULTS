@@ -1,0 +1,11 @@
+$ time ./bench1 > /dev/null
+
+real	0m0.079s
+user	0m0.072s
+sys	0m0.004s
+
+$ time ./bench2 > /dev/null
+
+real	0m1.614s
+user	0m1.352s
+sys	0m0.260s
