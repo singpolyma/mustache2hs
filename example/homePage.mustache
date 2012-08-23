@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Blog Home</title>
+	</head>
+
+	<body>
+		{{#postCount}}
+			<ol class="hfeed">
+				{{#posts}}
+					<li class="hentry">
+						<section>
+							{{> post.mustache}}
+						</section>
+					</li>
+				{{/posts}}
+			</ol>
+		{{/postCount}}
+	</body>
+</html>
