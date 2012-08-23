@@ -1,0 +1,15 @@
+This utility take in Haskell records (single data constructor only)
+and a list of mustache template and record name pairs, and generates
+Haskell code for functions that take an escape function and one of
+the records, and returns a 'Builder'.
+
+This allows most records to be used as context for rendering a
+template, and gives GHC the ability to typecheck the template's use of
+record fields at compile time.  It also means your application does
+not need to be reading template files off disk in production.
+
+Usage example:
+
+> mustache2hs -m Records.hs main.mustache SomeRec sub.mustache OtherRec
+
+A full example is in the git repository.

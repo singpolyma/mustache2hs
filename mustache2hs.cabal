@@ -1,0 +1,52 @@
+name:            mustache2hs
+version:         0.1
+cabal-version:   >= 1.8
+license:         OtherLicense
+license-file:    COPYING
+category:        Utility
+copyright:       © 2012 Stephen Paul Weber
+author:          Stephen Paul Weber <singpolyma@singpolyma.net>
+maintainer:      Stephen Paul Weber <singpolyma@singpolyma.net>
+stability:       experimental
+tested-with:     GHC == 7.0.3
+synopsis:        Utility to generate Haskell code from Mustache templates
+homepage:        http://github.com/singpolyma/mustache2hs
+bug-reports:     http://github.com/singpolyma/mustache2hs/issues
+build-type:      Simple
+description:
+        This utility take in Haskell records (single data constructor only)
+        and a list of mustache template and record name pairs, and generates
+        Haskell code for functions that take an escape function and one of
+        the records, and returns a 'Builder'.
+        .
+        This allows most records to be used as context for rendering a
+        template, and gives GHC the ability to typecheck the template's use of
+        record fields at compile time.  It also means your application does
+        not need to be reading template files off disk in production.
+        .
+        Usage example:
+        .
+        > mustache2hs -m Records.hs main.mustache SomeRec sub.mustache OtherRec
+        .
+        A full example is in the git repository.
+
+extra-source-files:
+        README
+
+executable mustache2hs
+        main-is: mustache2hs.hs
+
+        build-depends:
+                base == 4.*,
+                text,
+                parsec,
+                haskell-src,
+                utf8-string,
+                bytestring,
+                blaze-builder,
+                transformers,
+                filepath
+
+source-repository head
+        type:     git
+        location: git://github.com/singpolyma/mustache2hs.git
