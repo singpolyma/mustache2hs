@@ -39,7 +39,7 @@ executable mustache2hs
         build-depends:
                 base == 4.*,
                 text,
-                parsec,
+                parsec >= 3.1.2,
                 haskell-src,
                 utf8-string,
                 bytestring,
