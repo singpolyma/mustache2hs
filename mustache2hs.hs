@@ -4,7 +4,7 @@ import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 import System.Console.GetOpt (getOpt, usageInfo, ArgOrder(..), OptDescr(..), ArgDescr(..))
-import System.FilePath (takeBaseName, dropExtension, takeDirectory, (</>))
+import System.FilePath (takeBaseName, dropExtension, takeDirectory, (</>), normalise)
 import Data.Monoid
 import Data.Maybe
 import Data.Char
@@ -19,7 +19,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Data.Attoparsec.Text
+import Text.Parsec hiding ((<|>), State, many)
+import Text.Parsec.Text
 import Control.Applicative
 
 import Blaze.ByteString.Builder (Builder)
@@ -44,7 +45,8 @@ usage errors = do
 	name <- getProgName
 	hPutStrLn stderr $ usageInfo (name ++ " [-m MODULE] <input-file> <record-name> ...") flags
 
-type MuTree =  [Mustache]
+type MuTree =  [MustachePos]
+type MustachePos = (SourcePos, Mustache)
 
 data Mustache =
 	MuText       Text |
@@ -62,17 +64,17 @@ isMuComment _ = False
 parser :: Parser MuTree
 parser = do
 	body <- many1 (
-			comment <|>
-			sectionInv <|>
-			section <|>
-			partial <|>
-			tripleVar <|>
-			ampVar <|>
-			mustache False (var True) <|>
-			singlebrace <|>
-			txt
+			try (withPos comment) <|>
+			try (withPos sectionInv) <|>
+			try (withPos section) <|>
+			try (withPos partial) <|>
+			try (withPos tripleVar) <|>
+			try (withPos ampVar) <|>
+			try (withPos (mustache False (var True))) <|>
+			try (withPos singlebrace) <|>
+			try (withPos txt)
 		)
-	return $ filter (not . isMuComment) body
+	return $ filter (not . isMuComment . snd) body
 	where
 	comment = mustache True $ do
 		_ <- char '!'
@@ -115,14 +117,20 @@ parser = do
 		v <- f
 		_ <- char '}'
 		_ <- char '}'
-		when ws (endOfLine <|> pure ())
+		when ws (try endOfLine <|> pure ())
 		return v
+	withPos = liftA2 (,) getPosition
+	-- Parsec compat with Attoparsec
+	peekChar = lookAhead (option Nothing (Just <$> anyChar))
+	skipSpace = skipMany (satisfy isSpace)
+	endOfLine = void ((char '\r' >> char '\n') <|> (char '\n'))
+	takeWhile1 f = T.pack <$> many1 (satisfy f)
 
 mintercalate :: (Monoid a) => a -> [a] -> a
 mintercalate xs xss = mconcat (intersperse xs xss)
 
 originalMustache :: MuTree -> Builder
-originalMustache = mconcat . map origOne
+originalMustache = mconcat . map (origOne . snd)
 	where
 	origOne (MuText txt) = Builder.fromText txt
 	origOne (MuVar name True) = mconcat [
@@ -166,7 +174,16 @@ monoidSpecialCase name rec = Builder.fromText $ case lookup name (snd rec) of
 codeGenTree :: (Show a, Enum a) => FilePath -> Text -> String -> Records -> MuTree -> Word -> State a (Builder, [(FilePath, String)])
 codeGenTree path fname rname recs tree level = do
 	let rec = recordMustExist $ lookup rname recs
-	(code, helpers', partials) <- unzip3 <$> mapM (codeGen path (rname,rec) recs level) tree
+	(code, helpers', partials) <- unzip3 <$> mapM (\(pos,m) -> do
+			(code, helpers, partials) <- codeGen path (rname,rec) recs level m
+			let code' = mconcat [
+					linePragma pos,
+					Builder.fromString "\n\t",
+					indent,
+					code
+				]
+			return (code', helpers, partials)
+		) tree
 	let helpers = concat helpers'
 	return (mconcat [
 			Builder.fromText fname,
@@ -271,6 +288,15 @@ codeGen path (rname,rec) recs _ (MuPartial name) =
 	], [], [(file, rname)])
 codeGen _ _ _ _ _ = return (mempty, [], [])
 
+linePragma :: SourcePos -> Builder
+linePragma s = mconcat [
+		Builder.fromString "{-# LINE ",
+		Builder.fromShow $ sourceLine s,
+		Builder.fromString " ",
+		Builder.fromShow $ sourceName s,
+		Builder.fromString " #-}"
+	]
+
 camelCasePath :: FilePath -> Text
 camelCasePath = T.pack . lowerHead . go
 	where
@@ -283,26 +309,28 @@ camelCasePath = T.pack . lowerHead . go
 		| otherwise  = go cs
 	go []           = []
 
-codeGenFile :: Records -> (FilePath, String) -> StateT [(FilePath, String)] IO (Builder, [(FilePath, String)])
+codeGenFile :: Records -> (FilePath, String) -> StateT [(FilePath, String)] IO (Maybe Builder, [(FilePath, String)])
 codeGenFile recs (input, rname) = do
-	alreadyGen <- lookup input <$> get
+	alreadyGen <- lookup input' <$> get
 	case alreadyGen of
 		Just r
-			| r == rname -> return (mempty, [])
+			| r == rname -> return (Nothing, [])
 			| otherwise -> fail ("Type mismatch, template " ++ input ++ " expects both " ++ r ++ " and " ++ "rname")
 		Nothing -> do
-			modify ((input,rname):)
-			Right tree <- lift $ parseOnly parser <$> T.readFile input
+			modify ((input',rname):)
+			Right tree <- lift $ parse parser input <$> T.readFile input
 			let fname = camelCasePath (dropExtension input)
 			let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0) 0
-			return (builder, partials)
+			return (Just builder, partials)
+	where
+	input' = normalise input
 
 codeGenFiles :: Records -> [(FilePath, String)] -> StateT [(FilePath, String)] IO Builder
 codeGenFiles _ [] = return mempty
 codeGenFiles recs inputs = do
 		(builders, partials) <- unzip <$> mapM (codeGenFile recs) inputs
 		builder <- codeGenFiles recs (concat partials)
-		return $ (mintercalate nl builders) `mappend` nl `mappend` builder
+		return $ (mintercalate nl $ catMaybes builders) `mappend` nl `mappend` builder
 		where
 		nl = Builder.fromString "\n\n"
 
