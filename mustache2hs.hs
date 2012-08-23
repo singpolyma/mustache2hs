@@ -4,7 +4,7 @@ import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 import System.Console.GetOpt (getOpt, usageInfo, ArgOrder(..), OptDescr(..), ArgDescr(..))
-import System.FilePath (takeBaseName, dropExtension, takeDirectory, (</>), normalise)
+import System.FilePath (dropExtension, takeDirectory, (</>), normalise)
 import Data.Monoid
 import Data.Maybe
 import Data.Char
@@ -78,7 +78,7 @@ parser = do
 	where
 	comment = mustache True $ do
 		_ <- char '!'
-		many $ do
+		_ <- many $ do
 				c1 <- anyChar
 				c2 <- peekChar
 				if c1 /= '}' || c2 /= Just '}' then return c1 else
@@ -123,7 +123,7 @@ parser = do
 	-- Parsec compat with Attoparsec
 	peekChar = lookAhead (option Nothing (Just <$> anyChar))
 	skipSpace = skipMany (satisfy isSpace)
-	endOfLine = void ((char '\r' >> char '\n') <|> (char '\n'))
+	endOfLine = void ((char '\r' >> char '\n') <|> char '\n')
 	takeWhile1 f = T.pack <$> many1 (satisfy f)
 
 mintercalate :: (Monoid a) => a -> [a] -> a
@@ -208,11 +208,11 @@ codeGenTree path fname rname recs tree level = do
 	pattern rec = mconcat [
 			Builder.fromString (fst rec),
 			Builder.fromString " {",
-			mintercalate icomma $ map (\x -> mconcat [
+			mintercalate icomma $ map ((\x -> mconcat [
 					Builder.fromText x,
 					Builder.fromString "=",
 					Builder.fromText x
-				]) (map fst $ snd rec),
+				]) . fst) (snd rec),
 			Builder.fromString "}"
 		]
 	indent = Builder.fromString $ concat $
@@ -244,9 +244,7 @@ codeGen path (rname,rec) recs level (MuSection name stree)
 				Builder.fromString " )"
 			], [], [])
 	| otherwise = do
-		id <- get
-		modify succ
-		let nm = name `mappend` T.pack (show id)
+		nm <- nextName name
 		case lookup name (snd rec) of
 			Just (MuList rname) -> do
 				(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
@@ -266,9 +264,7 @@ codeGen path (rname,rec) recs level (MuSection name stree)
 						Builder.fromString " escapeFunction ctx else mempty"
 					], [helper], partials)
 codeGen path (rname,rec) recs level (MuSectionInv name stree) = do
-	id <- get
-	modify succ
-	let nm = name `mappend` T.pack (show id)
+	nm <- nextName name
 	(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
 	return (mconcat [
 			Builder.fromString "if mempty == ",
@@ -277,7 +273,7 @@ codeGen path (rname,rec) recs level (MuSectionInv name stree) = do
 			Builder.fromText nm,
 			Builder.fromString " escapeFunction ctx else mempty"
 		], [helper], partials)
-codeGen path (rname,rec) recs _ (MuPartial name) =
+codeGen path (rname,_) _ _ (MuPartial name) =
 	let
 		file = takeDirectory path </> T.unpack name
 		fname = camelCasePath (dropExtension file)
@@ -296,6 +292,12 @@ linePragma s = mconcat [
 		Builder.fromShow $ sourceName s,
 		Builder.fromString " #-}"
 	]
+
+nextName :: (Show a, Enum a) => Text -> State a Text
+nextName name = do
+	id <- get
+	modify succ
+	return $ name `mappend` T.pack (show id)
 
 camelCasePath :: FilePath -> Text
 camelCasePath = T.pack . lowerHead . go
@@ -320,7 +322,7 @@ codeGenFile recs (input, rname) = do
 			modify ((input',rname):)
 			Right tree <- lift $ parse parser input <$> T.readFile input
 			let fname = camelCasePath (dropExtension input)
-			let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0) 0
+			let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0) (0::Int)
 			return (Just builder, partials)
 	where
 	input' = normalise input
@@ -330,7 +332,7 @@ codeGenFiles _ [] = return mempty
 codeGenFiles recs inputs = do
 		(builders, partials) <- unzip <$> mapM (codeGenFile recs) inputs
 		builder <- codeGenFiles recs (concat partials)
-		return $ (mintercalate nl $ catMaybes builders) `mappend` nl `mappend` builder
+		return $ mintercalate nl (catMaybes builders) `mappend` nl `mappend` builder
 		where
 		nl = Builder.fromString "\n\n"
 

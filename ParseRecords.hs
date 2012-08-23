@@ -35,7 +35,7 @@ hsTypeName' :: [(String, HsType)] -> HsType -> Maybe String
 hsTypeName' types (HsTyCon (UnQual s)) | isJust $ lookup (hsNameToString s) types =
 	hsTypeName' types =<< lookup (hsNameToString s) types
 hsTypeName' _ (HsTyCon (UnQual s)) = Just $ hsNameToString s
-hsTypeName' _ t = Nothing
+hsTypeName' _ _ = Nothing
 
 hsTypeName :: [(String, HsType)] -> HsType -> String
 hsTypeName types t =
