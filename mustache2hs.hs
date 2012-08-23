@@ -227,11 +227,11 @@ codeGen _ _ _ _ (MuText txt) = return (mconcat [
 		Builder.fromShow (T.unpack txt)
 	], [], [])
 codeGen _ _ _ _ (MuVar name False) = return (mconcat [
-		Builder.fromString "Builder.fromString $ show $ pretty ",
+		Builder.fromString "Builder.fromLazyText $ displayT $ renderPretty 0.4 80 $ pretty ",
 		Builder.fromText name
 	], [], [])
 codeGen _ _ _ _ (MuVar name True) = return (mconcat [
-		Builder.fromString "Builder.fromString $ escapeFunction $ show $ pretty ",
+		Builder.fromString "Builder.fromLazyText $ escapeFunction $ displayT $ renderPretty 0.4 80 $ pretty ",
 		Builder.fromText name
 	], [], [])
 codeGen path (rname,rec) recs level (MuSection name stree)
@@ -356,8 +356,8 @@ main = do
 		putStrLn "module MustacheTemplates where"
 		putStrLn ""
 		putStrLn "import Data.Monoid"
-		putStrLn "import Text.PrettyPrint.Leijen"
-		putStrLn "import qualified Blaze.ByteString.Builder.Char.Utf8 as Builder"
+		putStrLn "import Text.PrettyPrint.Leijen.Text"
+		putStrLn "import qualified Data.Text.Lazy.Builder as Builder"
 		mapM_ (\m -> putStrLn $ "import " ++ m ++ "\n") ms
 		Builder.toByteStringIO BS.putStr builder
 		putStrLn ""

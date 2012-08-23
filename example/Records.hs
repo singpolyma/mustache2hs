@@ -1,8 +1,8 @@
 module Records where
 
 import Text.Blaze.Html
-import Text.Blaze.Html.Renderer.String
-import Text.PrettyPrint.Leijen
+import Text.Blaze.Html.Renderer.Text
+import Text.PrettyPrint.Leijen.Text
 
 newtype HTML = HTML Html
 

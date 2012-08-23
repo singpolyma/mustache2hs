@@ -2,24 +2,20 @@ module Main where
 
 import Text.Blaze.Internal
 import Text.Blaze.Html5
-import Blaze.ByteString.Builder
-import qualified Data.ByteString as BS
+import Text.Blaze.Html.Renderer.Text
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
+import qualified Data.Text.Lazy.Builder as TL
 
 import Records
 import MustacheTemplates
 
-htmlEscape :: String -> String
-htmlEscape = concatMap escChar
-	where
-	escChar '&' = "&amp;"
-	escChar '"' = "&quot;"
-	escChar '<' = "&lt;"
-	escChar '>' = "&gt;"
-	escChar c   = [c]
+htmlEscape :: TL.Text -> TL.Text
+htmlEscape = renderHtml . lazyText
 
 main :: IO ()
-main = toByteStringIO BS.putStr $
+main = TL.putStr $ TL.toLazyText $
 	homePage htmlEscape (Blog {
 		postCount = 2,
 		posts = [
