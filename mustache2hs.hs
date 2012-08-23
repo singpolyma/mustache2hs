@@ -148,6 +148,14 @@ originalMustache = mconcat . map origOne
 		]
 	origOne _ = mempty
 
+monoidSpecialCase :: Text -> Record -> Builder
+monoidSpecialCase name rec = Builder.fromText $ case lookup name (snd rec) of
+	Just MuBool ->
+		T.pack "(Any " `mappend` name `mappend` T.pack ")"
+	Just MuNum ->
+		T.pack "(Sum " `mappend` name `mappend` T.pack ")"
+	_ -> name
+
 codeGenTree :: (Show a, Enum a) => FilePath -> Text -> String -> Records -> MuTree -> Word -> State a (Builder, [(FilePath, String)])
 codeGenTree path fname rname recs tree level = do
 	let rec = recordMustExist $ lookup rname recs
@@ -224,21 +232,15 @@ codeGen path (rname,rec) recs level (MuSection name stree)
 						Builder.fromString " escapeFunction) ",
 						Builder.fromText name
 					], [helper], partials)
-			Just MuBool ->
-				doVar (T.pack "(Any " `mappend` name `mappend` T.pack ")") nm
-			Just MuNum ->
-				doVar (T.pack "(Sum " `mappend` name `mappend` T.pack ")") nm
-			_ -> doVar name nm
-	where
-	doVar name nm = do
-		(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
-		return (mconcat [
-				Builder.fromString "if mempty /= ",
-				Builder.fromText name,
-				Builder.fromString " then ",
-				Builder.fromText nm,
-				Builder.fromString " escapeFunction ctx else mempty"
-			], [helper], partials)
+			_ -> do
+				(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
+				return (mconcat [
+						Builder.fromString "if mempty /= ",
+						monoidSpecialCase name rec,
+						Builder.fromString " then ",
+						Builder.fromText nm,
+						Builder.fromString " escapeFunction ctx else mempty"
+					], [helper], partials)
 codeGen path (rname,rec) recs level (MuSectionInv name stree) = do
 	id <- get
 	modify succ
@@ -246,7 +248,7 @@ codeGen path (rname,rec) recs level (MuSectionInv name stree) = do
 	(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
 	return (mconcat [
 			Builder.fromString "if mempty == ",
-			Builder.fromText name,
+			monoidSpecialCase name rec,
 			Builder.fromString " then ",
 			Builder.fromText nm,
 			Builder.fromString " escapeFunction ctx else mempty"
