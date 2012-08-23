@@ -309,7 +309,11 @@ main = do
 		let types' = concat types
 		let inputs' = map (second (\r -> fromMaybe r (join $ lookup r types'))) inputs
 		builder <- evalStateT (codeGenFiles (concat recs) inputs') []
-		putStrLn "import Data.Maybe"
+		-- GHC pragma turns off warnings we know about
+		-- Should be ignored by other compilers, so is safe
+		putStrLn "{-# OPTIONS_GHC -fno-warn-missing-signatures -fno-warn-unused-matches #-}"
+		putStrLn "module MustacheTemplates where"
+		putStrLn ""
 		putStrLn "import Data.Monoid"
 		putStrLn "import Text.PrettyPrint.Leijen"
 		putStrLn "import qualified Blaze.ByteString.Builder.Char.Utf8 as Builder"
