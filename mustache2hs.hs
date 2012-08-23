@@ -185,17 +185,12 @@ codeGen _ _ _ (MuText txt) = return (mconcat [
 		Builder.fromShow (T.unpack txt)
 	], [], [])
 codeGen _ _ _ (MuVar name False) = return (mconcat [
-		Builder.fromString "fromMaybe mempty (fmap ",
-		Builder.fromString "(Builder.fromString . show . pretty) (",
-		Builder.fromText name,
-		Builder.fromString "))"
+		Builder.fromString "Builder.fromString $ show $ pretty ",
+		Builder.fromText name
 	], [], [])
 codeGen _ _ _ (MuVar name True) = return (mconcat [
-		Builder.fromString "fromMaybe mempty (fmap (",
-		Builder.fromString "Builder.fromString . escapeFunction . show . pretty",
-		Builder.fromString ") (",
-		Builder.fromText name,
-		Builder.fromString "))"
+		Builder.fromString "Builder.fromString $ escapeFunction $ show $ pretty ",
+		Builder.fromText name
 	], [], [])
 codeGen path (rname,rec) recs (MuSection name stree)
 	| lookup name (snd rec) == Just MuLambda =
@@ -219,22 +214,28 @@ codeGen path (rname,rec) recs (MuSection name stree)
 						Builder.fromString " escapeFunction) ",
 						Builder.fromText name
 					], [helper], partials)
-			_ -> do
-				(helper, partials) <- codeGenTree path nm rname recs stree
-				return (mconcat [
-						Builder.fromString "case ",
-						Builder.fromText name,
-						Builder.fromString " of { Just _ -> (",
-						Builder.fromText nm,
-						Builder.fromString " escapeFunction ctx); _ -> mempty }"
-					], [helper], partials)
+			Just MuBool ->
+				doVar (T.pack "(Any " `mappend` name `mappend` T.pack ")") nm
+			Just MuNum ->
+				doVar (T.pack "(Sum " `mappend` name `mappend` T.pack ")") nm
+			_ -> doVar name nm
+	where
+	doVar name nm = do
+		(helper, partials) <- codeGenTree path nm rname recs stree
+		return (mconcat [
+				Builder.fromString "if mempty /= ",
+				Builder.fromText name,
+				Builder.fromString " then ",
+				Builder.fromText nm,
+				Builder.fromString " escapeFunction ctx else mempty"
+			], [helper], partials)
 codeGen path (rname,rec) recs (MuSectionInv name stree) = do
 	id <- get
 	modify succ
 	let nm = name `mappend` T.pack (show id)
 	(helper, partials) <- codeGenTree path nm rname recs stree
 	return (mconcat [
-			Builder.fromString "if foldr (\\_ _ -> False) True ",
+			Builder.fromString "if mempty == ",
 			Builder.fromText name,
 			Builder.fromString " then ",
 			Builder.fromText nm,
@@ -296,8 +297,6 @@ main = do
 		let types' = concat types
 		let inputs' = map (second (\r -> fromMaybe r (join $ lookup r types'))) inputs
 		builder <- evalStateT (codeGenFiles (concat recs) inputs') []
-		putStrLn "import Prelude hiding (foldr)"
-		putStrLn "import Data.Foldable (foldr)"
 		putStrLn "import Data.Maybe"
 		putStrLn "import Data.Monoid"
 		putStrLn "import Text.PrettyPrint.Leijen"

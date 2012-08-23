@@ -13,7 +13,7 @@ import qualified Data.Text as T
 type Records = [(String, Record)] -- Typename, data constructor
 type Record = (String, [Field]) -- Data constructor name, fields
 type Field = (Text, MuType)
-data MuType = MuList String | MuLambda | MuVariable deriving (Show, Eq)
+data MuType = MuList String | MuLambda | MuVariable | MuBool | MuNum deriving (Show, Eq)
 
 isDataDecl :: HsDecl -> Bool
 isDataDecl (HsDataDecl {}) = True
@@ -47,6 +47,11 @@ hsTypeToMuType types (HsTyApp (HsTyCon (Special HsListCon)) t) = MuList (hsTypeN
 hsTypeToMuType _ (HsTyFun {}) = MuLambda
 hsTypeToMuType types (HsTyCon (UnQual s)) | isJust $ lookup (hsNameToString s) types =
 	hsTypeToMuType types $ fromJust $ lookup (hsNameToString s) types
+hsTypeToMuType types t | hsTypeName' types t == Just "Bool" = MuBool
+hsTypeToMuType types t | hsTypeName' types t `elem` map Just [
+		"Int", "Int8", "Int16", "Int32", "Int64", "Integer", "Word", "Word8",
+		"Word16", "Word32", "Word64", "Double", "Float", "Rational"
+	] = MuNum
 hsTypeToMuType _ _ = MuVariable
 
 extractFromField :: [(String, HsType)] -> ([HsName], HsBangType) -> Field
