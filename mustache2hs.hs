@@ -68,12 +68,13 @@ parser = do
 			partial <|>
 			tripleVar <|>
 			ampVar <|>
-			mustache (var True) <|>
+			mustache False (var True) <|>
+			singlebrace <|>
 			txt
 		)
 	return $ filter (not . isMuComment) body
 	where
-	comment = mustache $ do
+	comment = mustache True $ do
 		_ <- char '!'
 		many $ do
 				c1 <- anyChar
@@ -84,31 +85,37 @@ parser = do
 	sectionInv =
 		liftA2 MuSectionInv (sectionPiece '^') parser <* sectionPiece '/'
 	section = liftA2 MuSection (sectionPiece '#') parser <* sectionPiece '/'
-	sectionPiece c = mustache $ do
+	sectionPiece c = mustache True $ do
 		_ <- char c
 		name
-	partial = mustache $ do
+	partial = mustache False $ do
 		_ <- char '>'
 		skipSpace
 		MuPartial <$> takeWhile1 (/='}')
-	tripleVar = mustache $ do
+	tripleVar = mustache False $ do
 		_ <- char '{'
 		v <- var False
 		_ <- char '}'
 		return v
-	ampVar = mustache $ do
+	ampVar = mustache False $ do
 		_ <- char '&'
 		skipSpace
 		var False
 	var escaped = (`MuVar` escaped) <$> name
-	txt = MuText <$> takeWhile1 (/='{') -- TODO: allow single { in text
+	singlebrace = MuText <$> T.singleton <$> (do
+			c <- char '{'
+			n <- peekChar
+			if n == Just '{' then fail "singlebrace not match {{" else return c
+		)
+	txt = MuText <$> takeWhile1 (/='{')
 	name = takeWhile1 (\c -> isAlpha c || isDigit c)
-	mustache f = do
+	mustache ws f = do
 		_ <- char '{'
 		_ <- char '{'
 		v <- f
 		_ <- char '}'
 		_ <- char '}'
+		when ws (endOfLine <|> pure ())
 		return v
 
 mintercalate :: (Monoid a) => a -> [a] -> a
