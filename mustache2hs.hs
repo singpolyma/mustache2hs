@@ -79,9 +79,9 @@ parser = do
 	comment = mustache True $ do
 		_ <- char '!'
 		_ <- many $ do
-				c1 <- anyChar
+				c1 <- peekChar
 				c2 <- peekChar
-				if c1 /= '}' || c2 /= Just '}' then return c1 else
+				if c1 /= Just '}' || c2 /= Just '}' then anyChar else
 					fail "End of comment text"
 		return MuComment
 	sectionInv =
