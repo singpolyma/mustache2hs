@@ -320,10 +320,13 @@ codeGenFile recs (input, rname) = do
 			| otherwise -> fail ("Type mismatch, template " ++ input ++ " expects both " ++ r ++ " and " ++ "rname")
 		Nothing -> do
 			modify ((input',rname):)
-			Right tree <- lift $ parse parser input <$> T.readFile input
-			let fname = camelCasePath (dropExtension input)
-			let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0) (0::Int)
-			return (Just builder, partials)
+			parsed <- lift $ parse (parser <* eof) input <$> T.readFile input
+			case parsed of
+				Right tree -> do
+					let fname = camelCasePath (dropExtension input)
+					let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0) (0::Int)
+					return (Just builder, partials)
+				Left msg -> error (show msg)
 	where
 	input' = normalise input
 
