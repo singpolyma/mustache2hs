@@ -1,8 +1,8 @@
 module Records where
 
 import Text.Blaze.Html
-import Text.Blaze.Html.Renderer.String
-import Text.PrettyPrint.Leijen
+import Text.Blaze.Html.Renderer.Text
+import Data.Text.Buildable
 
 newtype HTML = HTML Html
 
@@ -16,5 +16,5 @@ data Post = Post {
 	entryContent :: HTML
 }
 
-instance Pretty HTML where
-	pretty (HTML html) = string $ renderHtml html
+instance Buildable HTML where
+	build (HTML html) = renderHtmlBuilder html
