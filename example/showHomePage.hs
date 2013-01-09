@@ -2,9 +2,9 @@ module Main where
 
 import Text.Blaze.Internal
 import Text.Blaze.Html5
-import Blaze.ByteString.Builder
-import qualified Data.ByteString as BS
 import qualified Data.Text as T
+import qualified Data.Text.Lazy.IO as TL
+import qualified Data.Text.Lazy.Builder as TL
 
 import Records
 import MustacheTemplates
@@ -19,7 +19,7 @@ htmlEscape = concatMap escChar
 	escChar c   = [c]
 
 main :: IO ()
-main = toByteStringIO BS.putStr $
+main = TL.putStr $ TL.toLazyText $
 	homePage htmlEscape (Blog {
 		postCount = 2,
 		posts = [
