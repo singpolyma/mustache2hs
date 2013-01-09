@@ -1,7 +1,7 @@
-This utility take in Haskell records (single data constructor only)
+This utility takes in Haskell records (single data constructor only)
 and a list of mustache template and record name pairs, and generates
 Haskell code for functions that take an escape function and one of
-the records, and returns a 'Builder'.
+the records, and returns a 'Data.Text.Lazy.Builder.Builder'.
 
 This allows most records to be used as context for rendering a
 template, and gives GHC the ability to typecheck the template's use of

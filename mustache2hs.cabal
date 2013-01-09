@@ -1,5 +1,5 @@
 name:            mustache2hs
-version:         0.1
+version:         0.2
 cabal-version:   >= 1.8
 license:         OtherLicense
 license-file:    COPYING
@@ -14,10 +14,10 @@ homepage:        http://github.com/singpolyma/mustache2hs
 bug-reports:     http://github.com/singpolyma/mustache2hs/issues
 build-type:      Simple
 description:
-        This utility take in Haskell records (single data constructor only)
+        This utility takes in Haskell records (single data constructor only)
         and a list of mustache template and record name pairs, and generates
         Haskell code for functions that take an escape function and one of
-        the records, and returns a 'Builder'.
+        the records, and returns a 'Data.Text.Lazy.Builder.Builder'.
         .
         This allows most records to be used as context for rendering a
         template, and gives GHC the ability to typecheck the template's use of
