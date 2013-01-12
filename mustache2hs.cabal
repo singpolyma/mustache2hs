@@ -1,5 +1,5 @@
 name:            mustache2hs
-version:         0.2
+version:         0.2.1
 cabal-version:   >= 1.8
 license:         OtherLicense
 license-file:    COPYING
@@ -35,6 +35,8 @@ extra-source-files:
 
 executable mustache2hs
         main-is: mustache2hs.hs
+
+        other-modules: ParseRecords
 
         build-depends:
                 base == 4.*,
