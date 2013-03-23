@@ -10,7 +10,7 @@ import Data.Maybe
 import Data.Char
 import Data.Word
 import Data.List
-import Control.Monad
+import Control.Monad (when, join)
 import Control.Arrow
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (get, modify, evalState, State, StateT, evalStateT)
@@ -30,6 +30,10 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.UTF8 as BS
 
 import ParseRecords
+
+-- | Available as of base-4.3.0.0 in Control.Monad
+void :: Functor f => f a -> f ()
+void = fmap (const ())
 
 data Flag = Help | RecordModule String deriving (Show, Read, Eq)
 

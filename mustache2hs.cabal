@@ -39,7 +39,7 @@ executable mustache2hs
         other-modules: ParseRecords
 
         build-depends:
-                base >= 4.3.0.0,
+                base >= 4.2.0.0,
                 text,
                 parsec >= 3.1.2,
                 haskell-src,
