@@ -167,13 +167,14 @@ originalMustache = mconcat . map (origOne . snd)
 		]
 	origOne _ = mempty
 
-monoidSpecialCase :: Text -> Record -> Builder
-monoidSpecialCase name rec = Builder.fromText $ case lookup name (snd rec) of
-	Just MuBool ->
-		T.pack "(Any " `mappend` name `mappend` T.pack ")"
-	Just MuNum ->
-		T.pack "(Sum " `mappend` name `mappend` T.pack ")"
-	_ -> name
+monoidSpecialCase :: Text -> Record -> Records -> Builder
+monoidSpecialCase name rec recs = Builder.fromText $
+	case lookup name (allFields rec recs) of
+		Just MuBool ->
+			T.pack "(Any " `mappend` name `mappend` T.pack ")"
+		Just MuNum ->
+			T.pack "(Sum " `mappend` name `mappend` T.pack ")"
+		_ -> name
 
 codeGenTree :: (Show a, Enum a) => FilePath -> Text -> String -> Records -> MuTree -> Word -> State a (Builder, [(FilePath, String)])
 codeGenTree path fname rname recs tree level = do
@@ -225,6 +226,10 @@ codeGenTree path fname rname recs tree level = do
 	icomma = Builder.fromString ", "
 	comma = Builder.fromString ",\n\t" `mappend` indent
 
+allFields :: Record -> Records -> [Field]
+allFields (_, fs) [] = fs
+allFields (_, fs) ((_,r):rs) = fs ++ allFields r rs
+
 codeGen :: (Show a, Enum a) => FilePath -> (String,Record) -> Records -> Word -> Mustache -> State a (Builder, [Builder], [(FilePath, String)])
 codeGen _ _ _ _ (MuText txt) = return (mconcat [
 		Builder.fromString "build ",
@@ -239,7 +244,7 @@ codeGen _ _ _ _ (MuVar name True) = return (mconcat [
 		Builder.fromText name
 	], [], [])
 codeGen path (rname,rec) recs level (MuSection name stree)
-	| lookup name (snd rec) == Just MuLambda =
+	| lookup name (allFields rec recs) == Just MuLambda =
 		return (mconcat [
 				Builder.fromText name,
 				Builder.fromString " (",
@@ -249,7 +254,7 @@ codeGen path (rname,rec) recs level (MuSection name stree)
 			], [], [])
 	| otherwise = do
 		nm <- nextName name
-		case lookup name (snd rec) of
+		case lookup name (allFields rec recs) of
 			Just (MuList rname) -> do
 				(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
 				return (mconcat [
@@ -262,7 +267,7 @@ codeGen path (rname,rec) recs level (MuSection name stree)
 				(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
 				return (mconcat [
 						Builder.fromString "if mempty /= ",
-						monoidSpecialCase name rec,
+						monoidSpecialCase name rec recs,
 						Builder.fromString " then ",
 						Builder.fromText nm,
 						Builder.fromString " escapeFunction ctx else mempty"
@@ -272,7 +277,7 @@ codeGen path (rname,rec) recs level (MuSectionInv name stree) = do
 	(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
 	return (mconcat [
 			Builder.fromString "if mempty == ",
-			monoidSpecialCase name rec,
+			monoidSpecialCase name rec recs,
 			Builder.fromString " then ",
 			Builder.fromText nm,
 			Builder.fromString " escapeFunction ctx else mempty"
