@@ -35,11 +35,12 @@ import ParseRecords
 void :: Functor f => f a -> f ()
 void = fmap (const ())
 
-data Flag = Help | RecordModule String deriving (Show, Read, Eq)
+data Flag = Help | RecordModule String | OutputName String deriving (Show, Read, Eq)
 
 flags :: [OptDescr Flag]
 flags = [
 		Option ['m'] ["record-module"] (ReqArg RecordModule "MODULE") "Module containing records to be used as context.",
+		Option ['o'] ["output-name"] (ReqArg OutputName "NAME") "Name of the output module. (Defaults to MustacheTemplates)",
 		Option ['h'] ["help"] (NoArg Help) "Show this help text."
 	]
 
@@ -47,7 +48,7 @@ usage :: [String] -> IO ()
 usage errors = do
 	mapM_ (hPutStrLn stderr) errors
 	name <- getProgName
-	hPutStrLn stderr $ usageInfo (name ++ " [-m MODULE] <input-file> <record-name> ...") flags
+	hPutStrLn stderr $ usageInfo (name ++ " [-m MODULE] [-o NAME] <input-file> <record-name> ...") flags
 
 type MuTree =  [MustachePos]
 type MustachePos = (SourcePos, Mustache)
@@ -355,9 +356,9 @@ main = do
 		_ | Help `elem` flags -> usage errors
 		_ | null (getRecordModules flags) -> usage errors >> exitFailure
 		_ | null args -> usage errors >> exitFailure
-		_ -> main' (getRecordModules flags) (pairs args)
+		_ -> main' (getOutputName flags) (getRecordModules flags) (pairs args)
 	where
-	main' recordModules inputs = do
+	main' outputName recordModules inputs = do
 		(ms, recs, types) <- unzip3 <$> mapM (fmap extractRecords . readFile) recordModules
 		let types' = concat types
 		let inputs' = map (second (\r -> fromMaybe r (join $ lookup r types'))) inputs
@@ -365,7 +366,7 @@ main = do
 		-- GHC pragma turns off warnings we know about
 		-- Should be ignored by other compilers, so is safe
 		putStrLn "{-# OPTIONS_GHC -fno-warn-missing-signatures -fno-warn-unused-matches #-}"
-		putStrLn "module MustacheTemplates where"
+		putStrLn $ "module " ++ outputName ++ " where"
 		putStrLn ""
 		putStrLn "import Data.Monoid"
 		putStrLn "import Data.Text.Buildable (build)"
@@ -374,6 +375,10 @@ main = do
 		mapM_ (\m -> putStrLn $ "import " ++ m ++ "\n") ms
 		Builder.toByteStringIO BS.putStr builder
 		putStrLn ""
+	getOutputName = foldr (\new cur -> case new of
+			OutputName n -> n
+			_ -> cur
+		) "MustacheTemplates"
 	getRecordModules = foldr (\x ms -> case x of
 			RecordModule m -> m : ms
 			_ -> ms
