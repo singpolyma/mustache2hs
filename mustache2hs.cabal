@@ -1,5 +1,5 @@
 name:            mustache2hs
-version:         0.2.2
+version:         0.3
 cabal-version:   >= 1.8
 license:         OtherLicense
 license-file:    COPYING
