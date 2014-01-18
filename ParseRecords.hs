@@ -80,5 +80,5 @@ extractRecords moduleSrc =
 	where
 	simpleTypes = map (second $ hsTypeName' types) types
 	types = map extractFromTypeDecl typeDecls
-	(typeDecls, datas) = partition (isTypeDecl) $ filter (\d -> isDataDecl d || isTypeDecl d) decls
+	(typeDecls, datas) = partition isTypeDecl $ filter (\d -> isDataDecl d || isTypeDecl d) decls
 	ParseOk (HsModule _ (Module mod) _ _ decls) = parseModule moduleSrc

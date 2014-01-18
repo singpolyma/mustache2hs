@@ -115,7 +115,9 @@ parser = do
 			if n == Just '{' then fail "singlebrace not match {{" else return c
 		)
 	txt = MuText <$> takeWhile1 (/='{')
-	name = takeWhile1 (\c -> isAlpha c || isDigit c || c == '_')
+	name = do
+		nm <- takeWhile1 (\c -> isAlpha c || isDigit c || c == '_' || c == '.')
+		return $ if nm == T.singleton '.' then T.pack "ctx" else nm
 	mustache ws f = do
 		_ <- char '{'
 		_ <- char '{'
@@ -137,51 +139,53 @@ mintercalate xs xss = mconcat (intersperse xs xss)
 originalMustache :: MuTree -> Builder
 originalMustache = mconcat . map (origOne . snd)
 	where
+	maybeDot name
+		| name == T.pack "ctx" = Builder.fromString "."
+		| otherwise = Builder.fromText name
 	origOne (MuText txt) = Builder.fromText txt
 	origOne (MuVar name True) = mconcat [
 			Builder.fromString "{{",
-			Builder.fromText name,
+			maybeDot name,
 			Builder.fromString "}}"
 		]
 	origOne (MuVar name False) = mconcat [
 			Builder.fromString "{{{",
-			Builder.fromText name,
+			maybeDot name,
 			Builder.fromString "}}}"
 		]
 	origOne (MuSection name tree) = mconcat [
 			Builder.fromString "{{#",
-			Builder.fromText name,
+			maybeDot name,
 			Builder.fromString "}}",
 			originalMustache tree,
 			Builder.fromString "{{/",
-			Builder.fromText name,
+			maybeDot name,
 			Builder.fromString "}}"
 		]
 	origOne (MuSectionInv name tree) = mconcat [
 			Builder.fromString "{{^",
-			Builder.fromText name,
+			maybeDot name,
 			Builder.fromString "}}",
 			originalMustache tree,
 			Builder.fromString "{{/",
-			Builder.fromText name,
+			maybeDot name,
 			Builder.fromString "}}"
 		]
 	origOne _ = mempty
 
-monoidSpecialCase :: Text -> Record -> Records -> Builder
-monoidSpecialCase name rec recs = Builder.fromText $
-	case lookup name (allFields rec recs) of
+monoidSpecialCase :: Text -> [Field] -> Builder
+monoidSpecialCase name allFields = Builder.fromText $
+	case lookup name allFields of
 		Just MuBool ->
 			T.pack "(Any " `mappend` name `mappend` T.pack ")"
 		Just MuNum ->
 			T.pack "(Sum " `mappend` name `mappend` T.pack ")"
 		_ -> name
 
-codeGenTree :: (Show a, Enum a) => FilePath -> Text -> String -> Records -> MuTree -> Word -> State a (Builder, [(FilePath, String)])
-codeGenTree path fname rname recs tree level = do
-	let rec = recordMustExist $ lookup rname recs
+codeGenTree :: (Show a, Enum a) => FilePath -> Text -> String -> Records -> MuTree -> Word -> [Field] -> State a (Builder, [(FilePath, String)])
+codeGenTree path fname rname recs tree level fields = do
 	(code, helpers', partials) <- unzip3 <$> mapM (\(pos,m) -> do
-			(code, helpers, partials) <- codeGen path (rname,rec) recs level m
+			(code, helpers, partials) <- codeGen path rname recs level lFields m
 			let code' = mconcat [
 					linePragma pos,
 					Builder.fromString "\n\t",
@@ -194,7 +198,7 @@ codeGenTree path fname rname recs tree level = do
 	return (mconcat [
 			Builder.fromText fname,
 			Builder.fromString " escapeFunction ctx@(",
-			pattern rec,
+			maybe (Builder.fromString "_") pattern rec,
 			Builder.fromString ") = mconcat [\n\t",
 			indent,
 			mintercalate comma code,
@@ -209,8 +213,8 @@ codeGenTree path fname rname recs tree level = do
 			mintercalate wsep helpers
 		], concat partials)
 	where
-	recordMustExist (Just r) = r
-	recordMustExist _ = error ("No record named: " ++ rname)
+	lFields = maybe id (\(_,fs) -> (fs++)) rec fields
+	rec = lookup rname recs
 	pattern rec = mconcat [
 			Builder.fromString (fst rec),
 			Builder.fromString " {",
@@ -227,72 +231,69 @@ codeGenTree path fname rname recs tree level = do
 	icomma = Builder.fromString ", "
 	comma = Builder.fromString ",\n\t" `mappend` indent
 
-allFields :: Record -> Records -> [Field]
-allFields (_, fs) [] = fs
-allFields (_, fs) ((_,r):rs) = fs ++ allFields r rs
-
-codeGen :: (Show a, Enum a) => FilePath -> (String,Record) -> Records -> Word -> Mustache -> State a (Builder, [Builder], [(FilePath, String)])
-codeGen _ _ _ _ (MuText txt) = return (mconcat [
+codeGen :: (Show a, Enum a) => FilePath -> String -> Records -> Word -> [Field] -> Mustache -> State a (Builder, [Builder], [(FilePath, String)])
+codeGen _ _ _ _ _ (MuText txt) = return (mconcat [
 		Builder.fromString "build ",
 		Builder.fromShow (T.unpack txt)
 	], [], [])
-codeGen _ _ _ _ (MuVar name False) = return (mconcat [
+codeGen _ _ _ _ _ (MuVar name False) = return (mconcat [
 		Builder.fromString "build ",
 		Builder.fromText name
 	], [], [])
-codeGen _ _ _ _ (MuVar name True) = return (mconcat [
+codeGen _ _ _ _ _ (MuVar name True) = return (mconcat [
 		Builder.fromString "build $ escapeFunction $ TL.unpack $ TL.toLazyText $ build ",
 		Builder.fromText name
 	], [], [])
-codeGen path (rname,rec) recs level (MuSection name stree)
-	| lookup name (allFields rec recs) == Just MuLambda =
-		return (mconcat [
-				Builder.fromText name,
-				Builder.fromString " (",
-				Builder.fromShow $ BS.toString $
-					Builder.toByteString $ originalMustache stree,
-				Builder.fromString " )"
-			], [], [])
-	| otherwise = do
-		nm <- nextName name
-		case lookup name (allFields rec recs) of
-			Just (MuList rname) -> do
-				(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
-				return (mconcat [
-						Builder.fromString "mconcat $ map (",
-						Builder.fromText nm,
-						Builder.fromString " escapeFunction) ",
-						Builder.fromText name
-					], [helper], partials)
-			_ -> do
-				(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
-				return (mconcat [
-						Builder.fromString "if mempty /= ",
-						monoidSpecialCase name rec recs,
-						Builder.fromString " then ",
-						Builder.fromText nm,
-						Builder.fromString " escapeFunction ctx else mempty"
-					], [helper], partials)
-codeGen path (rname,rec) recs level (MuSectionInv name stree) = do
+codeGen pth _ recs lvl fs (MuSection name stree) = do
 	nm <- nextName name
-	(helper, partials) <- codeGenTree path nm rname recs stree (level+1)
+	case lookup name fs of
+		Just MuLambda ->
+			return (mconcat [
+					Builder.fromText name,
+					Builder.fromString " (",
+					Builder.fromShow $ BS.toString $
+						Builder.toByteString $ originalMustache stree,
+					Builder.fromString " )"
+				], [], [])
+		Just (MuList rname) -> do
+			(helper, partials) <- codeGenTree pth nm rname recs stree (lvl+1) fs
+			return (mconcat [
+					Builder.fromString "mconcat $ map (",
+					Builder.fromText nm,
+					Builder.fromString " escapeFunction) ",
+					Builder.fromText name
+				], [helper], partials)
+		_ -> do
+			(helper, partials) <- codeGenTree pth nm "monoid" recs stree (lvl+1) fs
+			return (mconcat [
+					Builder.fromString "if mempty /= ",
+					monoidSpecialCase name fs,
+					Builder.fromString " then ",
+					Builder.fromText nm,
+					Builder.fromString " escapeFunction ",
+					Builder.fromText name,
+					Builder.fromString " else mempty"
+				], [helper], partials)
+codeGen pth rname recs lvl fs (MuSectionInv name stree) = do
+	nm <- nextName name
+	(helper, partials) <- codeGenTree pth nm rname recs stree (lvl+1) fs
 	return (mconcat [
 			Builder.fromString "if mempty == ",
-			monoidSpecialCase name rec recs,
+			monoidSpecialCase name fs,
 			Builder.fromString " then ",
 			Builder.fromText nm,
 			Builder.fromString " escapeFunction ctx else mempty"
 		], [helper], partials)
-codeGen path (rname,_) _ _ (MuPartial name) =
+codeGen pth rname _ _ _ (MuPartial name) =
 	let
-		file = takeDirectory path </> T.unpack name
+		file = takeDirectory pth </> T.unpack name
 		fname = camelCasePath (dropExtension file)
 	in
 	return (mconcat [
 		Builder.fromText fname,
 		Builder.fromString " escapeFunction ctx"
 	], [], [(file, rname)])
-codeGen _ _ _ _ _ = return (mempty, [], [])
+codeGen _ _ _ _ _ _ = return (mempty, [], [])
 
 linePragma :: SourcePos -> Builder
 linePragma s = mconcat [
@@ -326,15 +327,18 @@ codeGenFile recs (input, rname) = do
 	alreadyGen <- lookup input' <$> get
 	case alreadyGen of
 		Just r
-			| r == rname -> return (Nothing, [])
-			| otherwise -> fail ("Type mismatch, template " ++ input ++ " expects both " ++ r ++ " and " ++ "rname")
+			| r == rname || rname == "monoid" -> return (Nothing, [])
+			| r == "monoid" -> do
+				modify ((input',rname):)
+				return (Nothing, [])
+			| otherwise -> fail ("Type mismatch, template " ++ input ++ " expects both " ++ r ++ " and " ++ rname)
 		Nothing -> do
 			modify ((input',rname):)
 			parsed <- lift $ parse (parser <* eof) input <$> T.readFile input
 			case parsed of
 				Right tree -> do
 					let fname = camelCasePath (dropExtension input)
-					let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0) (0::Int)
+					let (builder, partials) = evalState (codeGenTree input fname rname recs tree 0 []) (0::Int)
 					return (Just builder, partials)
 				Left msg -> error (show msg)
 	where
